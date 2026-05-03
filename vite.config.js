@@ -7,14 +7,17 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['pwa-192x192.png', 'pwa-512x512.png'], // Add other assets like favicon here if needed
+      workbox: {
+        cleanupOutdatedCaches: true,
+      },
+      includeAssets: ['favicon.svg', 'pwa-192x192.png', 'pwa-512x512.png'],
       manifest: {
         name: 'Health Bento Fitness',
         short_name: 'Health Bento',
         description: 'Your personal AI fitness and diet companion',
-        theme_color: '#10b981', // Tailwind Emerald-500
+        theme_color: '#10b981',
         background_color: '#ffffff',
-        display: 'standalone', // This makes it look like a native app (hides browser URL bar)
+        display: 'standalone',
         icons: [
           {
             src: 'pwa-192x192.png',
