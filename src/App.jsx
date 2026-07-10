@@ -5,7 +5,7 @@ import {
   Apple, Droplets, Target, Award, PlayCircle, Settings, ArrowLeft,
   Edit2, Save, Clock, Plus, Trash2, Youtube, CalendarPlus, TrendingUp,
   Menu, Bell, Sun, Moon, Maximize2, Minimize2, Check, Download, RefreshCw, Palette,
-  BarChart2, Play, Pause, Square, Database, Share2, UploadCloud, Footprints, AlarmClock
+  BarChart2, Play, Pause, Square, Database, Share2, UploadCloud, Footprints, AlarmClock, Search
 } from 'lucide-react';
 
 // Safelist for Tailwind JIT - Encompassing all dynamic theme classes safely
@@ -157,6 +157,7 @@ export default function App() {
   const [waterNotificationsEnabled, setWaterNotificationsEnabled] = useState(true);
   const [showDietAlert, setShowDietAlert] = useState(false);
   const [showWaterAlert, setShowWaterAlert] = useState(false);
+  const [showFormGuide, setShowFormGuide] = useState(false);
   
   // 3. Analytics States
   const [analyticsRange, setAnalyticsRange] = useState('Today');
@@ -168,10 +169,18 @@ export default function App() {
   const currentDayOfWeek = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
   const [selectedDayIndex, setSelectedDayIndex] = useState(currentDayOfWeek);
   const [currentDayPlan, setCurrentDayPlan] = useState([]);
-  const [workoutLogs, setWorkoutLogs] = useState({});
+  
+  // Updated workoutLogs structure to support array of history entries
+  const [workoutLogs, setWorkoutLogs] = useState({}); 
+  
   const [showAddModal, setShowAddModal] = useState(false);
+  const [exerciseSearchTerm, setExerciseSearchTerm] = useState('');
   const [completedExercises, setCompletedExercises] = useState({ 0:[], 1:[], 2:[], 3:[], 4:[], 5:[], 6:[] }); 
   const [dailyBurnedCals, setDailyBurnedCals] = useState(0);
+
+  const [customExerciseDB, setCustomExerciseDB] = useState([]);
+  const [addExerciseTab, setAddExerciseTab] = useState('library');
+  const [newCustomEx, setNewCustomEx] = useState({ name: '', target: '', category: 'Gym workout', type: 'strength' });
   
   // 5. Session States
   const [sessionPhase, setSessionPhase] = useState(null); 
@@ -181,20 +190,15 @@ export default function App() {
   const [foodDB, setFoodDB] = useState(INITIAL_FOOD_DB);
   const [dailyMeals, setDailyMeals] = useState([]);
   const [dietInput, setDietInput] = useState({ name: '', cals: '', protein: '', carbs: '', fats: '', time: '' });
-  const [dietRecs, setDietRecs] = useState([]);
   const [showFoodSuggestions, setShowFoodSuggestions] = useState(false);
   const [saveToDB, setSaveToDB] = useState(false);
   
   const [showDBModal, setShowDBModal] = useState(false);
   const [showLogMealModal, setShowLogMealModal] = useState(false);
-  const [showRecsModal, setShowRecsModal] = useState(false);
+  const [showSavedDietsModal, setShowSavedDietsModal] = useState(false);
   
   // 7. Timer & Device States
-  const [showTimerFullScreen, setShowTimerFullScreen] = useState(false);
-  const [timerActive, setTimerActive] = useState(false);
-  const [timerSeconds, setTimerSeconds] = useState(0);
   const [exerciseLog, setExerciseLog] = useState({ sets: '', reps: '', weight: '' });
-  const [caloriesBurned, setCaloriesBurned] = useState(0);
   const [steps, setSteps] = useState(0);
   const [pedometerEnabled, setPedometerEnabled] = useState(false);
   const [history, setHistory] = useState({});
@@ -203,7 +207,8 @@ export default function App() {
   const [formData, setFormData] = useState({
     name: '', gender: 'Male', age: 25, weight: 70, height: 170,
     targetWeight: 65, targetDate: new Date(new Date().setMonth(new Date().getMonth() + 2)).toISOString().split('T')[0],
-    goal: 'Weight loss', preferences: ['Home workout', 'Gym workout'], dietaryFocus: 'General', avatar: null
+    goal: 'Weight loss', preferences: ['Home workout', 'Gym workout'], dietaryFocus: 'General', avatar: null,
+    useCustomMacros: false, customMacros: { calories: 2000, protein: 150, carbs: 200, fats: 65 }
   });
 
   // --- MEMOS ---
@@ -228,6 +233,14 @@ export default function App() {
 
   const nutritionTargets = useMemo(() => {
     if (!profile) return { calories: 0, protein: 0, carbs: 0, fats: 0 };
+    if (profile.useCustomMacros && profile.customMacros) {
+      return {
+        calories: Number(profile.customMacros.calories) || 0,
+        protein: Number(profile.customMacros.protein) || 0,
+        carbs: Number(profile.customMacros.carbs) || 0,
+        fats: Number(profile.customMacros.fats) || 0,
+      };
+    }
     return FitAI.calculateDiet(profile);
   }, [profile]);
 
@@ -237,9 +250,13 @@ export default function App() {
     const r = parseInt(exerciseLog.reps) || 0;
     const w = parseFloat(exerciseLog.weight) || 0;
     if (s === 0 || r === 0) return 0;
+    
+    // Fallback MET for custom exercises without one
+    const met = selectedExercise.met || 5.0; 
+    
     const timeHrs = (s * r * 3) / 3600;
     const effectiveWeight = profile.weight + w;
-    return selectedExercise.met * effectiveWeight * timeHrs;
+    return met * effectiveWeight * timeHrs;
   }, [exerciseLog.sets, exerciseLog.reps, exerciseLog.weight, selectedExercise, profile]);
 
   const currentCompletedList = completedExercises[selectedDayIndex] || [];
@@ -265,17 +282,42 @@ export default function App() {
     const savedCompleted = localStorage.getItem('hbCompleted_' + todayStr); 
     const savedBurned = localStorage.getItem('hbBurned_' + todayStr);
     const savedFoodDB = localStorage.getItem('hbFoodDB');
+    const savedCustomEx = localStorage.getItem('hbCustomExDB');
     const savedSteps = localStorage.getItem('hbSteps_' + todayStr);
     const savedHistory = localStorage.getItem('hbHistory');
     const savedCompletedDays = localStorage.getItem('hbCompletedDaysOfWeek');
     
-    if (savedProfile) setProfile(JSON.parse(savedProfile));
-    if (savedLogs) setWorkoutLogs(JSON.parse(savedLogs));
+    if (savedProfile) {
+      const parsed = JSON.parse(savedProfile);
+      // Ensure backwards compatibility with older saved profiles
+      if (parsed.useCustomMacros === undefined) parsed.useCustomMacros = false;
+      if (!parsed.customMacros) parsed.customMacros = { calories: 2000, protein: 150, carbs: 200, fats: 65 };
+      setProfile(parsed);
+      setFormData(parsed); // Sync formData for the edit screen
+    }
+
+    if (savedLogs) {
+       const parsedLogs = JSON.parse(savedLogs);
+       // Data Migration: Convert old single-entry logs into array format for history graph
+       Object.keys(parsedLogs).forEach(id => {
+          if (!Array.isArray(parsedLogs[id])) {
+             parsedLogs[id] = [{
+                date: parsedLogs[id].date || new Date().toISOString(),
+                sets: parsedLogs[id].sets || 0,
+                reps: parsedLogs[id].reps || 0,
+                weight: parsedLogs[id].maxWeight || 0
+             }];
+          }
+       });
+       setWorkoutLogs(parsedLogs);
+    }
+    
     if (savedTheme) setTheme(savedTheme);
     if (savedAccent) setAccent(savedAccent);
     if (savedDiet) setDailyMeals(JSON.parse(savedDiet)); 
     if (savedBurned) setDailyBurnedCals(parseFloat(savedBurned));
     if (savedFoodDB) setFoodDB(JSON.parse(savedFoodDB));
+    if (savedCustomEx) setCustomExerciseDB(JSON.parse(savedCustomEx));
     if (savedSteps) setSteps(Number(savedSteps));
     if (savedHistory) setHistory(JSON.parse(savedHistory));
     if (savedCompletedDays) setCompletedDaysOfWeek(JSON.parse(savedCompletedDays));
@@ -308,15 +350,12 @@ export default function App() {
   useEffect(() => {
     if (profile && weeklyPlan.length > 0) {
       const target = weeklyPlan[selectedDayIndex]?.target;
-      if (target) setCurrentDayPlan(FitAI.generatePlan(profile.goal, profile.preferences, target));
+      if (target) {
+         // Pass empty array for preferences to ignore them and just use day target keyword matching
+         setCurrentDayPlan(FitAI.generatePlan(profile.goal, [], target));
+      }
     }
   }, [selectedDayIndex, profile, weeklyPlan]);
-
-  useEffect(() => {
-    if (foodDB.length > 0 && dietRecs.length === 0) {
-      setDietRecs([...foodDB].sort(() => Math.random() - 0.5).slice(0, 4));
-    }
-  }, [foodDB, dietRecs.length]);
 
   useEffect(() => {
     if (!profile) return;
@@ -344,25 +383,6 @@ export default function App() {
   }, [isAllWorkoutsDone, selectedDayIndex, completedDaysOfWeek]);
 
   useEffect(() => {
-    let interval = null;
-    if (timerActive && profile && selectedExercise) {
-      interval = setInterval(() => {
-        setTimerSeconds(t => {
-          const newTime = t + 1;
-          const extraWeight = parseFloat(exerciseLog.weight) || 0;
-          const effectiveWeight = profile.weight + extraWeight;
-          const cals = selectedExercise.met * effectiveWeight * (newTime / 3600);
-          setCaloriesBurned(cals);
-          return newTime;
-        });
-      }, 1000);
-    } else {
-      clearInterval(interval);
-    }
-    return () => clearInterval(interval);
-  }, [timerActive, profile, selectedExercise, exerciseLog.weight]);
-
-  useEffect(() => {
     if (!pedometerEnabled) return;
     let lastUpdate = 0;
     const handleMotion = (e) => {
@@ -383,12 +403,6 @@ export default function App() {
 
 
   // --- UTILITY HANDLERS ---
-  const formatTime = (totalSeconds) => {
-    const m = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
-    const s = (totalSeconds % 60).toString().padStart(2, '0');
-    return `${m}:${s}`;
-  };
-
   const getDayName = () => ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'][new Date().getDay()];
 
   const enablePedometer = () => {
@@ -415,6 +429,10 @@ export default function App() {
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
     if (file) {
+      if (file.size > 2000000) {
+          alert("Image is too large. Please select an image under 2MB to save storage space.");
+          return;
+      }
       const reader = new FileReader();
       reader.onloadend = () => setFormData({...formData, avatar: reader.result});
       reader.readAsDataURL(file);
@@ -464,12 +482,31 @@ export default function App() {
     }
   };
 
-  const removeExercise = (indexToRemove) => {
-    setCurrentDayPlan(prev => prev.filter((_, i) => i !== indexToRemove));
+  const removeExercise = (idToRemove) => {
+    setCurrentDayPlan(prev => prev.filter(ex => ex.id !== idToRemove));
   };
-
-  const refreshDietRecs = () => {
-    setDietRecs([...foodDB].sort(() => Math.random() - 0.5).slice(0, 4));
+  
+  const handleCreateCustomExercise = () => {
+     if (!newCustomEx.name) return;
+     const newEx = {
+        id: Date.now(),
+        name: newCustomEx.name,
+        category: newCustomEx.category,
+        target: newCustomEx.target || 'General',
+        type: newCustomEx.type,
+        met: 5.0, // Default MET
+        steps: ['Custom exercise manually added.'],
+        dos: ['Maintain good form.'],
+        donts: []
+     };
+     
+     const updatedDB = [...customExerciseDB, newEx];
+     setCustomExerciseDB(updatedDB);
+     localStorage.setItem('hbCustomExDB', JSON.stringify(updatedDB));
+     
+     setCurrentDayPlan(prev => [...prev, newEx]);
+     setNewCustomEx({ name: '', target: '', category: 'Gym workout', type: 'strength' });
+     setShowAddModal(false);
   };
 
   const handleDietInputChange = (e) => {
@@ -532,7 +569,6 @@ export default function App() {
     const newDB = foodDB.filter(f => f.id !== id);
     setFoodDB(newDB);
     localStorage.setItem('hbFoodDB', JSON.stringify(newDB));
-    setDietRecs([...newDB].sort(() => Math.random() - 0.5).slice(0, 4));
   };
 
   const prefillDietInput = (food) => {
@@ -540,7 +576,7 @@ export default function App() {
       name: food.name, cals: food.cals.toString(), protein: food.protein.toString(),
       carbs: food.carbs.toString(), fats: food.fats.toString(), time: ''
     });
-    setShowRecsModal(false);
+    setShowSavedDietsModal(false);
     setShowLogMealModal(true);
   };
 
@@ -558,7 +594,8 @@ export default function App() {
       hbTheme: localStorage.getItem('hbTheme'),
       hbAccent: localStorage.getItem('hbAccent'),
       hbDietLog: localStorage.getItem('hbDietLog'),
-      hbFoodDB: localStorage.getItem('hbFoodDB')
+      hbFoodDB: localStorage.getItem('hbFoodDB'),
+      hbCustomExDB: localStorage.getItem('hbCustomExDB')
     };
     const blob = new Blob([JSON.stringify(data)], {type: "application/json"});
     const url = URL.createObjectURL(blob);
@@ -581,6 +618,7 @@ export default function App() {
         if(data.hbAccent) { localStorage.setItem('hbAccent', data.hbAccent); setAccent(data.hbAccent); }
         if(data.hbDietLog) { localStorage.setItem('hbDietLog', data.hbDietLog); setDailyMeals(JSON.parse(data.hbDietLog)); }
         if(data.hbFoodDB) { localStorage.setItem('hbFoodDB', data.hbFoodDB); setFoodDB(JSON.parse(data.hbFoodDB)); }
+        if(data.hbCustomExDB) { localStorage.setItem('hbCustomExDB', data.hbCustomExDB); setCustomExerciseDB(JSON.parse(data.hbCustomExDB)); }
         alert("Data restored successfully!");
       } catch (err) {
         alert("Invalid backup file.");
@@ -591,7 +629,6 @@ export default function App() {
 
 
   // --- RENDER HELPERS ---
-
   const getGoalAvatarStr = () => {
     if (!profile) return '🧍';
     const isMale = profile.gender === 'Male';
@@ -642,7 +679,6 @@ export default function App() {
   };
 
   const renderDashboardWidget = () => {
-    const streakDays = [true, true, true, false, false, false, false, false]; 
     return (
       <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden mb-6 relative transition-all flex h-full">
         <div className="absolute top-2 right-2 text-gray-400 dark:text-gray-500 cursor-pointer p-1 z-10" onClick={() => setWidgetExpanded(!widgetExpanded)}>
@@ -680,46 +716,6 @@ export default function App() {
              <span className={tc("text-emerald-500 flex items-center mt-1")}><Footprints className="w-3 h-3 mr-0.5"/> {steps} steps</span>
            </div>
         </div>
-      </div>
-    );
-  };
-
-  const renderTimerOverlay = () => {
-    if (!showTimerFullScreen || !selectedExercise) return null;
-    return (
-      <div className={`fixed inset-0 z-[100] ${theme === 'dark' ? 'bg-gray-950 text-white' : 'bg-gray-50 text-gray-900'} flex flex-col items-center justify-center animate-fade-in`}>
-         <button onClick={() => setShowTimerFullScreen(false)} className="absolute top-6 left-6 p-2 bg-gray-200 dark:bg-gray-800 rounded-full hover:bg-gray-300 dark:hover:bg-gray-700 transition-colors"><ArrowLeft className="w-6 h-6"/></button>
-         
-         <h2 className="text-2xl font-bold mb-2 text-center px-4">{selectedExercise.name}</h2>
-         <p className="text-sm text-gray-500 dark:text-gray-400 mb-12 flex items-center"><Target className="w-4 h-4 mr-1"/> {selectedExercise.target}</p>
-         
-         <div className={tc(`w-64 h-64 rounded-full border-8 border-emerald-500/20 flex items-center justify-center relative mb-12 shadow-[0_0_50px_rgba(0,0,0,0.1)] ${timerActive ? 'shadow-emerald-500/20' : ''}`)}>
-            {timerActive && <div className={tc("absolute inset-0 rounded-full border-8 border-emerald-500 border-t-transparent animate-spin")} style={{animationDuration: '2s'}}></div>}
-            <span className="text-6xl font-mono font-black">{formatTime(timerSeconds)}</span>
-         </div>
-
-         <div className="flex items-center gap-6 mb-12">
-            {!timerActive ? (
-              <button onClick={() => setTimerActive(true)} className={tc("w-20 h-20 bg-emerald-500 text-white rounded-full flex items-center justify-center shadow-lg hover:scale-105 transition-transform")}>
-                 <Play className="w-8 h-8 ml-1" />
-              </button>
-            ) : (
-              <button onClick={() => setTimerActive(false)} className="w-20 h-20 bg-amber-500 text-white rounded-full flex items-center justify-center shadow-lg hover:scale-105 transition-transform">
-                 <Pause className="w-8 h-8" />
-              </button>
-            )}
-            <button onClick={() => { setTimerActive(false); setTimerSeconds(0); setCaloriesBurned(0); }} className="w-14 h-14 bg-gray-200 dark:bg-gray-800 rounded-full flex items-center justify-center hover:scale-105 transition-transform text-gray-700 dark:text-gray-300">
-               <Square className="w-5 h-5" />
-            </button>
-         </div>
-
-         <div className="flex flex-col items-center">
-           <div className="flex items-center text-orange-500 font-bold text-xl">
-             <Flame className="w-6 h-6 mr-2 animate-pulse"/>
-             {caloriesBurned.toFixed(1)} kcal burned
-           </div>
-           <p className="text-xs text-gray-500 mt-2">(Calculated using MET value & {profile?.weight}kg bodyweight)</p>
-         </div>
       </div>
     );
   };
@@ -935,7 +931,7 @@ export default function App() {
           {sortedDayPlan.map((ex, idx) => {
             const isDone = currentCompletedList.includes(ex.id);
             return (
-            <div key={idx} className={`bg-white dark:bg-gray-900 p-4 rounded-2xl flex items-center justify-between border border-gray-200 dark:border-gray-800 group transition-all duration-500 shadow-sm ${isDone ? tc('opacity-60 bg-emerald-50/50 dark:bg-emerald-900/10 border-emerald-200 dark:border-emerald-800') : ''}`}>
+            <div key={ex.id || idx} className={`bg-white dark:bg-gray-900 p-4 rounded-2xl flex items-center justify-between border border-gray-200 dark:border-gray-800 group transition-all duration-500 shadow-sm ${isDone ? tc('opacity-60 bg-emerald-50/50 dark:bg-emerald-900/10 border-emerald-200 dark:border-emerald-800') : ''}`}>
               <div className="flex items-center flex-1 cursor-pointer" onClick={() => setSelectedExercise(ex)}>
                 <div className={`w-12 h-12 rounded-xl flex items-center justify-center mr-4 shrink-0 transition-colors ${isDone ? tc('bg-emerald-500 text-white') : 'bg-gray-50 dark:bg-gray-800'}`}>
                   {isDone ? <CheckCircle2 className="w-6 h-6" /> : (
@@ -955,10 +951,10 @@ export default function App() {
                 </div>
               </div>
               <div className="flex items-center gap-1">
-                <button onClick={(e) => { e.stopPropagation(); removeExercise(idx); }} className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                <button onClick={(e) => { e.stopPropagation(); removeExercise(ex.id); }} className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                   <Trash2 className="w-5 h-5" />
                 </button>
-                <PlayCircle onClick={(e) => { e.stopPropagation(); setSelectedExercise(ex); setShowTimerFullScreen(true); setTimerActive(true); }} className={tc(`w-6 h-6 shrink-0 cursor-pointer hover:opacity-100 ${isDone ? 'text-emerald-500 opacity-100' : 'text-emerald-500 opacity-50'}`)} />
+                <ChevronRight onClick={(e) => { e.stopPropagation(); setSelectedExercise(ex); }} className={tc(`w-6 h-6 shrink-0 cursor-pointer hover:opacity-100 ${isDone ? 'text-emerald-500 opacity-100' : 'text-gray-400'}`)} />
               </div>
             </div>
             );
@@ -987,16 +983,34 @@ export default function App() {
     </div>
   );
 
-  const renderExerciseDetail = () => (
+  const renderExerciseDetail = () => {
+    // Generate Graph Data from logs
+    const exLogs = workoutLogs[selectedExercise.id] || [];
+    const recentLogs = [...exLogs].sort((a, b) => new Date(a.date) - new Date(b.date)).slice(-10); // Show last 10 entries on graph
+    
+    let maxWeight = 10;
+    if (recentLogs.length > 0) {
+      maxWeight = Math.max(...recentLogs.map(l => l.weight), 10);
+    }
+    
+    // SVG Graph path generation
+    const width = 300; const height = 100;
+    const points = recentLogs.map((log, i) => {
+       const x = recentLogs.length > 1 ? (i / (recentLogs.length - 1)) * width : width / 2;
+       const y = height - ((log.weight / maxWeight) * height * 0.8) - 10; // 0.8 to give some padding at top
+       return `${x},${y}`;
+    }).join(' ');
+
+    return (
     <div className={theme}>
       <div className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 font-sans flex flex-col max-w-md mx-auto relative shadow-2xl overflow-y-auto transition-colors duration-300">
         
         <div className="sticky top-0 bg-white/80 dark:bg-gray-950/80 backdrop-blur-lg p-4 z-10 flex justify-between items-center border-b border-gray-200 dark:border-gray-800">
           <div className="flex items-center">
-            <button onClick={() => { setSelectedExercise(null); setTimerActive(false); setShowTimerFullScreen(false); setTimerSeconds(0); setCaloriesBurned(0); }} className="p-2 bg-gray-100 dark:bg-gray-900 rounded-full mr-4 hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors">
+            <button onClick={() => { setSelectedExercise(null); setExerciseLog({ sets: '', reps: '', weight: '' }); setShowFormGuide(false); }} className="p-2 bg-gray-100 dark:bg-gray-900 rounded-full mr-4 hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors">
               <ArrowLeft className="w-5 h-5 text-gray-900 dark:text-white" />
             </button>
-            <span className="font-bold text-sm text-gray-900 dark:text-white">Details</span>
+            <span className="font-bold text-sm text-gray-900 dark:text-white">Track Performance</span>
           </div>
         </div>
 
@@ -1007,66 +1021,141 @@ export default function App() {
             </div>
             <h1 className="text-3xl font-black mb-2 text-gray-900 dark:text-white">{selectedExercise.name}</h1>
             <p className="text-sm text-blue-500 dark:text-blue-400 font-medium mb-3 flex items-center"><Target className="w-4 h-4 mr-1"/> Targets: {selectedExercise.target}</p>
-
-            <a href={`https://www.youtube.com/results?search_query=${encodeURIComponent(selectedExercise.name + ' exercise form tutorial')}`} target="_blank" rel="noreferrer" className="flex items-center bg-red-50 dark:bg-red-500/10 hover:bg-red-100 dark:hover:bg-red-500/20 text-red-600 dark:text-red-400 p-3 rounded-xl border border-red-200 dark:border-red-500/20 transition-colors w-max">
-              <Youtube className="w-5 h-5 mr-2" />
-              <span className="text-sm font-bold">Watch Form on YouTube</span>
-            </a>
           </div>
 
+          {/* Form Guide Toggle Button */}
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-4 rounded-2xl shadow-sm">
+             <button onClick={() => setShowFormGuide(!showFormGuide)} className="w-full flex justify-between items-center text-left">
+                <span className="font-bold text-gray-900 dark:text-white flex items-center"><Activity className={tc("w-5 h-5 mr-2 text-emerald-500")}/> Form Guide & Tips</span>
+                {showFormGuide ? <Minimize2 className="w-4 h-4 text-gray-400"/> : <Maximize2 className="w-4 h-4 text-gray-400"/>}
+             </button>
+             
+             {showFormGuide && (
+               <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800 animate-fade-in">
+                 <div className="space-y-4 relative before:absolute before:inset-0 before:ml-3.5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-gray-200 dark:before:via-gray-800 before:to-transparent">
+                  {selectedExercise.steps?.map((step, i) => (
+                    <div key={i} className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
+                      <div className={tc("flex items-center justify-center w-7 h-7 rounded-full border-2 border-emerald-500 bg-white dark:bg-gray-900 text-emerald-500 text-xs font-bold shrink-0 z-10")}>
+                        {i + 1}
+                      </div>
+                      <div className="w-[calc(100%-2.5rem)] md:w-[calc(50%-2.5rem)] pl-4 md:pl-0">
+                        <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300">
+                          {step}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                 </div>
+                 
+                 <div className="grid grid-cols-2 gap-4 mt-6">
+                  <div className={tc("bg-emerald-50 dark:bg-emerald-500/5 border border-emerald-200 dark:border-emerald-500/20 p-4 rounded-xl")}>
+                    <h3 className={tc("text-emerald-700 dark:text-emerald-400 font-bold mb-3 flex items-center text-sm")}>
+                      <CheckCircle2 className="w-4 h-4 mr-2" /> DOs
+                    </h3>
+                    <ul className="space-y-2">
+                      {selectedExercise.dos?.map((item, i) => (
+                        <li key={i} className="text-xs text-gray-700 dark:text-gray-300 flex items-start">
+                          <span className={tc("text-emerald-500 mr-2")}>•</span> {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  {selectedExercise.donts && selectedExercise.donts.length > 0 && (
+                    <div className="bg-red-50 dark:bg-red-500/5 border border-red-200 dark:border-red-500/20 p-4 rounded-xl">
+                      <h3 className="text-red-700 dark:text-red-400 font-bold mb-3 flex items-center text-sm">
+                        <XCircle className="w-4 h-4 mr-2" /> DONTs
+                      </h3>
+                      <ul className="space-y-2">
+                        {selectedExercise.donts.map((item, i) => (
+                          <li key={i} className="text-xs text-gray-700 dark:text-gray-300 flex items-start">
+                            <span className="text-red-500 mr-2">•</span> {item}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                 </div>
+                 
+                 {!selectedExercise.id.toString().includes(Date.now().toString().slice(0,5)) && ( // Don't show youtube link for newly created custom workouts
+                     <a href={`https://www.youtube.com/results?search_query=${encodeURIComponent(selectedExercise.name + ' exercise form tutorial')}`} target="_blank" rel="noreferrer" className="mt-4 flex items-center justify-center bg-red-50 dark:bg-red-500/10 hover:bg-red-100 dark:hover:bg-red-500/20 text-red-600 dark:text-red-400 p-3 rounded-xl border border-red-200 dark:border-red-500/20 transition-colors w-full">
+                       <Youtube className="w-5 h-5 mr-2" />
+                       <span className="text-sm font-bold">Watch Form on YouTube</span>
+                     </a>
+                 )}
+               </div>
+             )}
+          </div>
+
+          {/* Performance Graph & History */}
           <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-5 rounded-2xl shadow-sm">
             <h3 className="text-gray-900 dark:text-white font-bold mb-4 flex items-center">
-              <Activity className={tc("w-5 h-5 mr-2 text-emerald-500")} /> Form Guide
+              <BarChart2 className={tc("w-5 h-5 mr-2 text-emerald-500")} /> Progression History
             </h3>
-            <div className="space-y-4 relative before:absolute before:inset-0 before:ml-3.5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-gray-200 dark:before:via-gray-800 before:to-transparent">
-              {selectedExercise.steps?.map((step, i) => (
-                <div key={i} className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
-                  <div className={tc("flex items-center justify-center w-7 h-7 rounded-full border-2 border-emerald-500 bg-white dark:bg-gray-900 text-emerald-500 text-xs font-bold shrink-0 z-10")}>
-                    {i + 1}
-                  </div>
-                  <div className="w-[calc(100%-2.5rem)] md:w-[calc(50%-2.5rem)] pl-4 md:pl-0">
-                    <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300">
-                      {step}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+            
+            {recentLogs.length > 0 ? (
+               <>
+                 {/* Visual Line Graph */}
+                 <div className="w-full h-32 mb-6 border-b border-l border-gray-200 dark:border-gray-700 relative">
+                    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible">
+                       {/* Background Grid Lines */}
+                       <line x1="0" y1={height/2} x2={width} y2={height/2} stroke="currentColor" strokeDasharray="4" className="text-gray-200 dark:text-gray-800" strokeWidth="1" />
+                       
+                       {/* Data Path */}
+                       {recentLogs.length > 1 && (
+                         <polyline points={points} fill="none" stroke="currentColor" strokeWidth="3" className={tc("text-emerald-500")} strokeLinecap="round" strokeLinejoin="round" />
+                       )}
+                       
+                       {/* Data Points */}
+                       {recentLogs.map((log, i) => {
+                          const x = recentLogs.length > 1 ? (i / (recentLogs.length - 1)) * width : width / 2;
+                          const y = height - ((log.weight / maxWeight) * height * 0.8) - 10;
+                          return (
+                             <g key={i}>
+                               <circle cx={x} cy={y} r="4" fill="currentColor" className={tc("text-emerald-500")} strokeWidth="2" stroke="white" />
+                               {i === recentLogs.length - 1 && (
+                                  <text x={x} y={y - 12} fontSize="10" fill="currentColor" className={tc("text-emerald-600 dark:text-emerald-400 font-bold")} textAnchor={i === 0 ? "start" : "end"}>{log.weight}</text>
+                               )}
+                             </g>
+                          )
+                       })}
+                    </svg>
+                    <div className="absolute -left-6 bottom-0 text-[10px] text-gray-400">0</div>
+                    <div className="absolute -left-8 top-0 text-[10px] text-gray-400">{maxWeight}</div>
+                 </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className={tc("bg-emerald-50 dark:bg-emerald-500/5 border border-emerald-200 dark:border-emerald-500/20 p-4 rounded-2xl")}>
-              <h3 className={tc("text-emerald-700 dark:text-emerald-400 font-bold mb-3 flex items-center text-sm")}>
-                <CheckCircle2 className="w-4 h-4 mr-2" /> DOs
-              </h3>
-              <ul className="space-y-2">
-                {selectedExercise.dos.map((item, i) => (
-                  <li key={i} className="text-xs text-gray-700 dark:text-gray-300 flex items-start">
-                    <span className={tc("text-emerald-500 mr-2")}>•</span> {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
-            {selectedExercise.donts && (
-              <div className="bg-red-50 dark:bg-red-500/5 border border-red-200 dark:border-red-500/20 p-4 rounded-2xl">
-                <h3 className="text-red-700 dark:text-red-400 font-bold mb-3 flex items-center text-sm">
-                  <XCircle className="w-4 h-4 mr-2" /> DONTs
-                </h3>
-                <ul className="space-y-2">
-                  {selectedExercise.donts.map((item, i) => (
-                    <li key={i} className="text-xs text-gray-700 dark:text-gray-300 flex items-start">
-                      <span className="text-red-500 mr-2">•</span> {item}
-                    </li>
-                  ))}
-                </ul>
-              </div>
+                 {/* History Table */}
+                 <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
+                    <table className="w-full text-left text-xs">
+                       <thead className="bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 uppercase">
+                          <tr>
+                             <th className="px-3 py-2 font-bold">Date</th>
+                             <th className="px-3 py-2 font-bold text-center">Volume (S×R)</th>
+                             <th className="px-3 py-2 font-bold text-right">Weight</th>
+                          </tr>
+                       </thead>
+                       <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                          {[...exLogs].reverse().map((log, i) => (
+                             <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                <td className="px-3 py-2 text-gray-900 dark:text-gray-300">{new Date(log.date).toLocaleDateString([], { month: 'short', day: 'numeric' })}</td>
+                                <td className="px-3 py-2 text-center text-gray-900 dark:text-gray-300 font-mono">{log.sets} × {log.reps}</td>
+                                <td className={tc("px-3 py-2 text-right font-bold text-emerald-600 dark:text-emerald-400")}>{log.weight}</td>
+                             </tr>
+                          ))}
+                       </tbody>
+                    </table>
+                 </div>
+               </>
+            ) : (
+               <div className="text-center p-6 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-dashed border-gray-200 dark:border-gray-700">
+                  <p className="text-gray-500 dark:text-gray-400 text-sm">No history logged yet. Enter your first set below!</p>
+               </div>
             )}
           </div>
 
           {/* Progress Logger */}
           <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-5 rounded-2xl shadow-sm">
             <h3 className="text-gray-900 dark:text-white font-bold mb-4 flex items-center">
-              <TrendingUp className={tc("w-5 h-5 mr-2 text-emerald-500")} /> Log Progress
+              <TrendingUp className={tc("w-5 h-5 mr-2 text-emerald-500")} /> Add New Log
             </h3>
             <div className="grid grid-cols-3 gap-3 mb-4">
               <div>
@@ -1084,49 +1173,48 @@ export default function App() {
             </div>
 
             {/* Real-time calculated calories based on rep volume */}
-            {repBasedEstCals > 0 && !showTimerFullScreen && (
+            {repBasedEstCals > 0 && (
               <div className="text-xs text-orange-500 font-bold bg-orange-50 dark:bg-orange-500/10 p-2 rounded flex items-center justify-center">
                 <Flame className="w-4 h-4 mr-1"/> Est. Burn: {repBasedEstCals.toFixed(1)} kcal (adjusted for {profile.weight}kg)
               </div>
             )}
           </div>
           
-          <div className="grid grid-cols-2 gap-3 pt-4 border-t border-gray-200 dark:border-gray-800">
-            <button onClick={() => { setShowTimerFullScreen(true); setTimerActive(true); }} className={tc("bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 font-bold py-4 rounded-xl flex items-center justify-center hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors")}>
-               <Clock className="w-5 h-5 mr-2"/> Run Timer
-            </button>
+          <div className="pt-2">
             <button 
               onClick={() => {
-                let calsToLog = caloriesBurned;
-                if (calsToLog === 0 && repBasedEstCals > 0) calsToLog = repBasedEstCals;
+                let calsToLog = repBasedEstCals;
 
                 if (exerciseLog.weight || exerciseLog.reps) {
-                   const currentPR = workoutLogs[selectedExercise.id]?.maxWeight || 0;
-                   saveLogs({
-                     ...workoutLogs,
-                     [selectedExercise.id]: {
-                       maxWeight: Math.max(currentPR, parseFloat(exerciseLog.weight) || 0), reps: exerciseLog.reps, sets: exerciseLog.sets, date: new Date().toISOString()
-                     }
-                   });
+                   const newEntry = {
+                      date: new Date().toISOString(),
+                      sets: parseInt(exerciseLog.sets) || 0,
+                      reps: parseInt(exerciseLog.reps) || 0,
+                      weight: parseFloat(exerciseLog.weight) || 0
+                   };
+                   
+                   const existingLogs = workoutLogs[selectedExercise.id] || [];
+                   const updatedLogs = [...existingLogs, newEntry];
+                   
+                   saveLogs({ ...workoutLogs, [selectedExercise.id]: updatedLogs });
                 }
                 
                 if (calsToLog > 0) addCaloriesBurned(calsToLog);
                 markExerciseCompleted(selectedExercise.id);
                 
-                setSelectedExercise(null); setTimerActive(false); setShowTimerFullScreen(false); setTimerSeconds(0); setCaloriesBurned(0);
+                setSelectedExercise(null); 
                 setExerciseLog({ sets: '', reps: '', weight: '' });
+                setShowFormGuide(false);
               }} 
-              className={tc("bg-emerald-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-emerald-500/20")}>
-              Save & Finish
+              className={tc("w-full bg-emerald-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-emerald-500/20")}>
+              Save & Finish Exercise
             </button>
           </div>
         </div>
-
-        {/* Full Screen Timer Overlay */}
-        {renderTimerOverlay()}
       </div>
     </div>
   );
+  };
 
   const renderSessionFlow = () => (
     <div className={theme}>
@@ -1140,7 +1228,7 @@ export default function App() {
             </div>
          </div>
 
-         <div className="p-6 max-w-md mx-auto w-full space-y-6">
+         <div className="p-6 max-w-md mx-auto w-full space-y-6 pb-24">
             <div>
               <div className={tc("inline-block px-3 py-1 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20 rounded-full text-xs font-bold uppercase tracking-widest mb-3")}>
                 Exercise {currentDayPlan.length - sessionQueue.length + 1} of {currentDayPlan.length}
@@ -1149,53 +1237,30 @@ export default function App() {
               <p className="text-sm text-blue-500 dark:text-blue-400 font-medium mb-3 flex items-center"><Target className="w-4 h-4 mr-1"/> Targets: {selectedExercise.target}</p>
             </div>
 
-            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-5 rounded-2xl shadow-sm">
-              <h3 className="text-gray-900 dark:text-white font-bold mb-4 flex items-center">
-                <Activity className={tc("w-5 h-5 mr-2 text-emerald-500")} /> Form Guide
-              </h3>
-              <div className="space-y-4 relative before:absolute before:inset-0 before:ml-3.5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-gray-200 dark:before:via-gray-800 before:to-transparent">
-                {selectedExercise.steps?.map((step, i) => (
-                  <div key={i} className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
-                    <div className={tc("flex items-center justify-center w-7 h-7 rounded-full border-2 border-emerald-500 bg-white dark:bg-gray-900 text-emerald-500 text-xs font-bold shrink-0 z-10")}>
-                      {i + 1}
-                    </div>
-                    <div className="w-[calc(100%-2.5rem)] md:w-[calc(50%-2.5rem)] pl-4 md:pl-0">
-                      <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300">
-                        {step}
+            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-4 rounded-2xl shadow-sm">
+               <button onClick={() => setShowFormGuide(!showFormGuide)} className="w-full flex justify-between items-center text-left">
+                  <span className="font-bold text-gray-900 dark:text-white flex items-center"><Activity className={tc("w-5 h-5 mr-2 text-emerald-500")}/> Form Guide & Tips</span>
+                  {showFormGuide ? <Minimize2 className="w-4 h-4 text-gray-400"/> : <Maximize2 className="w-4 h-4 text-gray-400"/>}
+               </button>
+               
+               {showFormGuide && (
+                 <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800 animate-fade-in">
+                   <div className="space-y-4 relative before:absolute before:inset-0 before:ml-3.5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-gray-200 dark:before:via-gray-800 before:to-transparent">
+                    {selectedExercise.steps?.map((step, i) => (
+                      <div key={i} className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
+                        <div className={tc("flex items-center justify-center w-7 h-7 rounded-full border-2 border-emerald-500 bg-white dark:bg-gray-900 text-emerald-500 text-xs font-bold shrink-0 z-10")}>
+                          {i + 1}
+                        </div>
+                        <div className="w-[calc(100%-2.5rem)] md:w-[calc(50%-2.5rem)] pl-4 md:pl-0">
+                          <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300">
+                            {step}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className={tc("bg-emerald-50 dark:bg-emerald-500/5 border border-emerald-200 dark:border-emerald-500/20 p-4 rounded-2xl")}>
-                <h3 className={tc("text-emerald-700 dark:text-emerald-400 font-bold mb-3 flex items-center text-sm")}>
-                  <CheckCircle2 className="w-4 h-4 mr-2" /> DOs
-                </h3>
-                <ul className="space-y-2">
-                  {selectedExercise.dos.map((item, i) => (
-                    <li key={i} className="text-xs text-gray-700 dark:text-gray-300 flex items-start">
-                      <span className={tc("text-emerald-500 mr-2")}>•</span> {item}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              {selectedExercise.donts && (
-                <div className="bg-red-50 dark:bg-red-500/5 border border-red-200 dark:border-red-500/20 p-4 rounded-2xl">
-                  <h3 className="text-red-700 dark:text-red-400 font-bold mb-3 flex items-center text-sm">
-                    <XCircle className="w-4 h-4 mr-2" /> DONTs
-                  </h3>
-                  <ul className="space-y-2">
-                    {selectedExercise.donts.map((item, i) => (
-                      <li key={i} className="text-xs text-gray-700 dark:text-gray-300 flex items-start">
-                        <span className="text-red-500 mr-2">•</span> {item}
-                      </li>
                     ))}
-                  </ul>
-                </div>
-              )}
+                   </div>
+                 </div>
+               )}
             </div>
 
             <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-5 rounded-2xl shadow-sm">
@@ -1216,30 +1281,30 @@ export default function App() {
                   <input type="number" placeholder="e.g. 20" value={exerciseLog.weight} onChange={e => setExerciseLog({...exerciseLog, weight: e.target.value})} className={tc("w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-center text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500")} />
                 </div>
               </div>
-              {repBasedEstCals > 0 && !showTimerFullScreen && (
+              {repBasedEstCals > 0 && (
                 <div className="text-xs text-orange-500 font-bold bg-orange-50 dark:bg-orange-500/10 p-2 rounded flex items-center justify-center">
                   <Flame className="w-4 h-4 mr-1"/> Est. Burn: {repBasedEstCals.toFixed(1)} kcal
                 </div>
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-3 pt-4">
-              <button onClick={() => { setShowTimerFullScreen(true); setTimerActive(true); }} className={tc("bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 font-bold py-4 rounded-xl flex items-center justify-center hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors")}>
-                 <Clock className="w-5 h-5 mr-2"/> Timer
-              </button>
+            <div className="pt-4">
               <button 
                 onClick={() => {
-                  let calsToLog = caloriesBurned;
-                  if (calsToLog === 0 && repBasedEstCals > 0) calsToLog = repBasedEstCals;
+                  let calsToLog = repBasedEstCals;
 
                   if (exerciseLog.weight || exerciseLog.reps) {
-                     const currentPR = workoutLogs[selectedExercise.id]?.maxWeight || 0;
-                     saveLogs({
-                       ...workoutLogs,
-                       [selectedExercise.id]: {
-                         maxWeight: Math.max(currentPR, parseFloat(exerciseLog.weight) || 0), reps: exerciseLog.reps, sets: exerciseLog.sets, date: new Date().toISOString()
-                       }
-                     });
+                     const newEntry = {
+                        date: new Date().toISOString(),
+                        sets: parseInt(exerciseLog.sets) || 0,
+                        reps: parseInt(exerciseLog.reps) || 0,
+                        weight: parseFloat(exerciseLog.weight) || 0
+                     };
+                     
+                     const existingLogs = workoutLogs[selectedExercise.id] || [];
+                     const updatedLogs = [...existingLogs, newEntry];
+                     
+                     saveLogs({ ...workoutLogs, [selectedExercise.id]: updatedLogs });
                   }
                   
                   if (calsToLog > 0) addCaloriesBurned(calsToLog);
@@ -1254,16 +1319,14 @@ export default function App() {
                       setSessionPhase('cooldown');
                   }
                   
-                  setTimerActive(false); setShowTimerFullScreen(false); setTimerSeconds(0); setCaloriesBurned(0);
                   setExerciseLog({ sets: '', reps: '', weight: '' });
+                  setShowFormGuide(false);
                 }} 
-                className={tc("bg-emerald-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-emerald-500/20 flex items-center justify-center")}>
+                className={tc("w-full bg-emerald-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-emerald-500/20 flex items-center justify-center")}>
                 Save & Next <ChevronRight className="w-5 h-5 ml-1"/>
               </button>
             </div>
          </div>
-         
-         {renderTimerOverlay()}
       </div>
     </div>
   );
@@ -1312,22 +1375,18 @@ export default function App() {
               <p className="font-bold text-red-500 text-sm">{dailyConsumed.fats}g / <span className="text-xs text-gray-400">{nutritionTargets.fats}g</span></p>
             </div>
           </div>
-          <p className="text-xs text-gray-500 mt-4 text-center">Nutritional goals adjusted for your bodyweight ({profile.weight} kg).</p>
+          <p className="text-xs text-gray-500 mt-4 text-center">Nutritional goals {profile.useCustomMacros ? 'set to custom values' : `adjusted for your bodyweight (${profile.weight} kg)`}.</p>
         </div>
 
         {/* Action Buttons */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3">
            <button onClick={() => setShowLogMealModal(true)} className={tc("flex flex-col items-center justify-center p-4 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-2xl border border-emerald-200 dark:border-emerald-500/20 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 transition-colors")}>
              <Plus className="w-6 h-6 mb-2"/>
-             <span className="text-xs font-bold">Log Meal</span>
+             <span className="text-sm font-bold">Log Meal</span>
            </button>
-           <button onClick={() => setShowRecsModal(true)} className={tc("flex flex-col items-center justify-center p-4 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-2xl border border-emerald-200 dark:border-emerald-500/20 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 transition-colors")}>
+           <button onClick={() => setShowSavedDietsModal(true)} className={tc("flex flex-col items-center justify-center p-4 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-2xl border border-emerald-200 dark:border-emerald-500/20 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 transition-colors")}>
              <Apple className="w-6 h-6 mb-2"/>
-             <span className="text-xs font-bold">Diet Ideas</span>
-           </button>
-           <button onClick={() => setShowDBModal(true)} className={tc("flex flex-col items-center justify-center p-4 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-2xl border border-emerald-200 dark:border-emerald-500/20 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 transition-colors")}>
-             <Database className="w-6 h-6 mb-2"/>
-             <span className="text-xs font-bold">Database</span>
+             <span className="text-sm font-bold">Saved Diets</span>
            </button>
         </div>
 
@@ -1361,113 +1420,6 @@ export default function App() {
              </div>
            )}
         </div>
-
-        {/* Modal: Log Meal */}
-        {showLogMealModal && (
-          <div className="fixed inset-0 bg-black/60 z-[100] flex flex-col items-center justify-end md:justify-center">
-            <div className="bg-white dark:bg-gray-900 w-full max-w-md p-6 rounded-t-3xl md:rounded-3xl shadow-2xl">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center"><Edit2 className={tc("w-5 h-5 mr-2 text-emerald-500")}/> Log a Meal</h3>
-                <button onClick={() => setShowLogMealModal(false)}><XCircle className="w-6 h-6 text-gray-500 dark:text-gray-400"/></button>
-              </div>
-              <div className="grid grid-cols-2 gap-3 mb-3 relative">
-                <div className="col-span-2 relative">
-                   <input type="text" placeholder="Meal Name (Start typing...)" value={dietInput.name} onChange={handleDietInputChange} onFocus={() => dietInput.name.length > 1 && setShowFoodSuggestions(true)} onBlur={() => setTimeout(() => setShowFoodSuggestions(false), 200)} className={tc("w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500")} />
-                   {showFoodSuggestions && (
-                     <div className="absolute bottom-full mb-1 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 max-h-40 overflow-y-auto">
-                       {foodDB.filter(f => f.name.toLowerCase().includes(dietInput.name.toLowerCase())).map((food, i) => (
-                         <div key={i} onClick={() => selectFoodSuggestion(food)} className="px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer border-b border-gray-100 dark:border-gray-700 last:border-0 flex justify-between items-center text-sm">
-                           <span className="text-gray-900 dark:text-white">{food.name}</span>
-                           <span className={tc("text-xs text-emerald-500 font-bold")}>{food.cals} kcal</span>
-                         </div>
-                       ))}
-                     </div>
-                   )}
-                </div>
-                <input type="number" placeholder="Calories" value={dietInput.cals} onChange={e => setDietInput({...dietInput, cals: e.target.value})} className={tc("bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500")} />
-                <input type="time" value={dietInput.time} onChange={e => setDietInput({...dietInput, time: e.target.value})} className={tc("bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500")} />
-                <input type="number" placeholder="Protein (g)" value={dietInput.protein} onChange={e => setDietInput({...dietInput, protein: e.target.value})} className={tc("bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500")} />
-                <input type="number" placeholder="Carbs (g)" value={dietInput.carbs} onChange={e => setDietInput({...dietInput, carbs: e.target.value})} className={tc("bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500")} />
-                <input type="number" placeholder="Fats (g)" value={dietInput.fats} onChange={e => setDietInput({...dietInput, fats: e.target.value})} className={tc("col-span-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500")} />
-              </div>
-              <div className="flex items-center mb-4 ml-1">
-                 <input type="checkbox" id="saveDb" checked={saveToDB} onChange={(e) => setSaveToDB(e.target.checked)} className={tc("mr-2 accent-emerald-500 rounded")} />
-                 <label htmlFor="saveDb" className="text-xs text-gray-500 dark:text-gray-400">Save to Database for future</label>
-              </div>
-              <button onClick={handleLogMeal} className={tc("w-full bg-emerald-500 text-white font-bold py-3 rounded-xl shadow-lg shadow-emerald-500/20")}>
-                Add to Daily Log
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Modal: Recommendations */}
-        {showRecsModal && (
-          <div className="fixed inset-0 bg-black/60 z-[100] flex flex-col items-center justify-end md:justify-center">
-            <div className="bg-white dark:bg-gray-900 w-full max-w-md p-6 rounded-t-3xl md:rounded-3xl max-h-[80vh] overflow-y-auto shadow-2xl">
-               <div className="flex items-center justify-between mb-4">
-                 <div className="flex items-center">
-                   <Apple className={tc("w-6 h-6 text-emerald-500 mr-2")} />
-                   <h3 className="text-lg font-bold text-gray-900 dark:text-white">Diet Ideas</h3>
-                 </div>
-                 <div className="flex gap-2">
-                   <button onClick={refreshDietRecs} className={tc("text-emerald-500 p-1 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 rounded-full transition-colors")}><RefreshCw className="w-5 h-5" /></button>
-                   <button onClick={() => setShowRecsModal(false)}><XCircle className="w-6 h-6 text-gray-500 dark:text-gray-400"/></button>
-                 </div>
-              </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">{behaviorText}</p>
-              
-              <div className="space-y-3">
-                {dietRecs.map((food, i) => (
-                  <div key={i} className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl border border-gray-200 dark:border-gray-700 group transition-all relative overflow-hidden">
-                    <div className="flex justify-between items-start mb-2">
-                      <div>
-                        <p className="font-bold text-sm text-gray-900 dark:text-white">{food.name}</p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">P:{food.protein}g | C:{food.carbs}g | F:{food.fats}g</p>
-                      </div>
-                      <span className={tc("text-emerald-600 dark:text-emerald-400 font-bold text-sm bg-emerald-100 dark:bg-emerald-500/10 px-2 py-0.5 rounded")}>{food.cals} kcal</span>
-                    </div>
-                    <div className="flex gap-2">
-                      <button onClick={() => prefillDietInput(food)} className="flex-1 bg-blue-100 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[10px] font-bold py-1.5 rounded flex items-center justify-center hover:bg-blue-200 dark:hover:bg-blue-500/20 transition-colors">
-                        <Edit2 className="w-3 h-3 mr-1" /> Log
-                      </button>
-                      <a href={`https://www.youtube.com/results?search_query=${encodeURIComponent(food.name + ' recipe healthy')}`} target="_blank" rel="noreferrer" className="flex-1 bg-red-100 dark:bg-red-500/10 text-red-600 dark:text-red-400 text-[10px] font-bold py-1.5 rounded flex items-center justify-center hover:bg-red-200 dark:hover:bg-red-500/20 transition-colors">
-                        <Youtube className="w-3 h-3 mr-1" /> Recipe
-                      </a>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Modal: Database Management */}
-        {showDBModal && (
-          <div className="fixed inset-0 bg-black/60 z-[100] flex flex-col items-center justify-end md:justify-center">
-            <div className="bg-white dark:bg-gray-900 w-full max-w-md p-6 rounded-t-3xl md:rounded-3xl max-h-[80vh] overflow-y-auto shadow-2xl">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="font-bold text-lg text-gray-900 dark:text-white flex items-center"><Database className={tc("w-5 h-5 mr-2 text-emerald-500")}/> Food Database</h3>
-                <button onClick={() => setShowDBModal(false)}><XCircle className="w-6 h-6 text-gray-500 dark:text-gray-400"/></button>
-              </div>
-              <div className="space-y-2">
-                {foodDB.map((food, i) => (
-                  <div key={i} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-                    <div>
-                      <p className="font-bold text-sm text-gray-900 dark:text-white truncate max-w-[180px]">{food.name}</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">P:{food.protein} C:{food.carbs} F:{food.fats}</p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className={tc("text-emerald-500 font-bold text-xs")}>{food.cals} kcal</span>
-                      <button onClick={() => handleDeleteFromDB(food.id)} className="p-1 hover:bg-red-100 dark:hover:bg-red-500/10 rounded"><Trash2 className="w-4 h-4 text-red-500" /></button>
-                    </div>
-                  </div>
-                ))}
-                {foodDB.length === 0 && <p className="text-center text-sm text-gray-500 py-4">Database is empty.</p>}
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     );
   };
@@ -1693,7 +1645,7 @@ export default function App() {
 
       {/* Profile Data */}
       <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 space-y-4 border border-gray-200 dark:border-gray-800 shadow-sm">
-        <h3 className="font-bold text-gray-900 dark:text-white mb-2">Body Metrics</h3>
+        <h3 className="font-bold text-gray-900 dark:text-white mb-2">Body Metrics & Targets</h3>
         {isEditingProfile ? (
           <div className="space-y-4">
             <div>
@@ -1720,6 +1672,37 @@ export default function App() {
                 <input type="number" value={formData.targetWeight} onChange={(e) => setFormData({...formData, targetWeight: e.target.value})} className={tc("w-full bg-gray-50 dark:bg-gray-800 rounded-lg px-3 py-2 text-gray-900 dark:text-white text-sm border border-gray-200 dark:border-gray-700 outline-none focus:ring-1 focus:ring-emerald-500")} />
               </div>
             </div>
+
+            {/* Custom Nutrition Targets Toggle */}
+            <div className="pt-4 border-t border-gray-100 dark:border-gray-800">
+               <div className="flex items-center justify-between mb-3">
+                 <span className="text-sm font-bold text-gray-900 dark:text-white">Custom Nutrition Targets</span>
+                 <button type="button" onClick={() => setFormData({...formData, useCustomMacros: !formData.useCustomMacros})} className={tc(`w-10 h-5 rounded-full relative transition-colors cursor-pointer ${formData.useCustomMacros ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-700'}`)}>
+                    <div className={`w-4 h-4 bg-white rounded-full absolute top-0.5 left-0.5 transition-transform duration-300 ${formData.useCustomMacros ? 'translate-x-5' : 'translate-x-0'}`} />
+                 </button>
+               </div>
+               
+               {formData.useCustomMacros && (
+                 <div className="grid grid-cols-2 gap-3 animate-fade-in">
+                   <div>
+                     <label className="text-xs text-gray-500 dark:text-gray-400">Calories</label>
+                     <input type="number" value={formData.customMacros?.calories || ''} onChange={(e) => setFormData({...formData, customMacros: {...formData.customMacros, calories: e.target.value}})} className={tc("w-full bg-gray-50 dark:bg-gray-800 rounded-lg px-3 py-2 text-gray-900 dark:text-white text-sm border border-gray-200 dark:border-gray-700 outline-none focus:ring-1 focus:ring-emerald-500")} />
+                   </div>
+                   <div>
+                     <label className="text-xs text-gray-500 dark:text-gray-400">Protein (g)</label>
+                     <input type="number" value={formData.customMacros?.protein || ''} onChange={(e) => setFormData({...formData, customMacros: {...formData.customMacros, protein: e.target.value}})} className={tc("w-full bg-gray-50 dark:bg-gray-800 rounded-lg px-3 py-2 text-gray-900 dark:text-white text-sm border border-gray-200 dark:border-gray-700 outline-none focus:ring-1 focus:ring-emerald-500")} />
+                   </div>
+                   <div>
+                     <label className="text-xs text-gray-500 dark:text-gray-400">Carbs (g)</label>
+                     <input type="number" value={formData.customMacros?.carbs || ''} onChange={(e) => setFormData({...formData, customMacros: {...formData.customMacros, carbs: e.target.value}})} className={tc("w-full bg-gray-50 dark:bg-gray-800 rounded-lg px-3 py-2 text-gray-900 dark:text-white text-sm border border-gray-200 dark:border-gray-700 outline-none focus:ring-1 focus:ring-emerald-500")} />
+                   </div>
+                   <div>
+                     <label className="text-xs text-gray-500 dark:text-gray-400">Fats (g)</label>
+                     <input type="number" value={formData.customMacros?.fats || ''} onChange={(e) => setFormData({...formData, customMacros: {...formData.customMacros, fats: e.target.value}})} className={tc("w-full bg-gray-50 dark:bg-gray-800 rounded-lg px-3 py-2 text-gray-900 dark:text-white text-sm border border-gray-200 dark:border-gray-700 outline-none focus:ring-1 focus:ring-emerald-500")} />
+                   </div>
+                 </div>
+               )}
+            </div>
           </div>
         ) : (
           <>
@@ -1737,19 +1720,242 @@ export default function App() {
               <span className="text-gray-500 dark:text-gray-400">Weight</span>
               <span className="font-bold text-gray-900 dark:text-white">{profile.weight} kg</span>
             </div>
-            <div className="flex justify-between items-center pb-2">
+            <div className="flex justify-between items-center border-b border-gray-100 dark:border-gray-800 pb-4">
               <span className="text-gray-500 dark:text-gray-400">Target</span>
               <span className="font-bold text-gray-900 dark:text-white">{profile.targetWeight} kg</span>
+            </div>
+            <div className="flex justify-between items-center pb-2">
+              <span className="text-gray-500 dark:text-gray-400">Nutrition Targets</span>
+              <button 
+                onClick={() => {
+                  setIsEditingProfile(true);
+                  if (!profile.useCustomMacros) setFormData(prev => ({ ...prev, useCustomMacros: true }));
+                }}
+                className={tc("font-bold text-xs px-3 py-1.5 rounded-lg cursor-pointer transition-colors shadow-sm flex items-center " + (profile.useCustomMacros ? "bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700"))}
+              >
+                {profile.useCustomMacros ? 'Custom' : 'AI Calculated'} <Edit2 className="w-3 h-3 ml-1" />
+              </button>
             </div>
           </>
         )}
       </div>
       
-      <button onClick={() => { localStorage.clear(); setProfile(null); setDailyMeals([]); setCompletedExercises({0:[], 1:[], 2:[], 3:[], 4:[], 5:[], 6:[]}); setDailyBurnedCals(0); setSteps(0); setHistory({}); setCompletedDaysOfWeek([]); setOnboardingStep(1); setFoodDB(INITIAL_FOOD_DB); }} className="w-full bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-500 font-bold py-4 rounded-xl border border-red-200 dark:border-red-500/20 hover:bg-red-100 dark:hover:bg-red-500/20 transition-colors">
+      <button onClick={() => { localStorage.clear(); setProfile(null); setDailyMeals([]); setCompletedExercises({0:[], 1:[], 2:[], 3:[], 4:[], 5:[], 6:[]}); setDailyBurnedCals(0); setSteps(0); setHistory({}); setCompletedDaysOfWeek([]); setOnboardingStep(1); setFoodDB(INITIAL_FOOD_DB); setCustomExerciseDB([]); }} className="w-full bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-500 font-bold py-4 rounded-xl border border-red-200 dark:border-red-500/20 hover:bg-red-100 dark:hover:bg-red-500/20 transition-colors">
         Reset App Data
       </button>
     </div>
   );
+
+  // --- TOP LEVEL MODALS (Ensures mobile keyboard / overlay stability) ---
+  const renderModals = () => {
+    return (
+      <>
+        {/* Modal: Add Exercise */}
+        {showAddModal && (
+          <div className="fixed inset-0 bg-black/60 z-[100] flex flex-col items-center justify-end md:justify-center">
+            <div className="bg-white dark:bg-gray-900 w-full max-w-md p-6 rounded-t-3xl md:rounded-3xl shadow-2xl max-h-[85vh] flex flex-col">
+              <div className="flex justify-between items-center mb-4 shrink-0">
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center"><Dumbbell className={tc("w-5 h-5 mr-2 text-emerald-500")}/> Add Exercise</h3>
+                <button onClick={() => setShowAddModal(false)}><XCircle className="w-6 h-6 text-gray-500 dark:text-gray-400"/></button>
+              </div>
+              
+              {/* Tabs for Library vs Custom */}
+              <div className="flex gap-2 bg-gray-100 dark:bg-gray-800 p-1 rounded-xl border border-gray-200 dark:border-gray-700 mb-4 shrink-0">
+                <button onClick={() => setAddExerciseTab('library')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${addExerciseTab === 'library' ? tc('bg-white dark:bg-gray-700 shadow text-emerald-500') : 'text-gray-500 dark:text-gray-400'}`}>Library</button>
+                <button onClick={() => setAddExerciseTab('custom')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${addExerciseTab === 'custom' ? tc('bg-white dark:bg-gray-700 shadow text-emerald-500') : 'text-gray-500 dark:text-gray-400'}`}>Custom</button>
+              </div>
+
+              {addExerciseTab === 'library' ? (
+                 <>
+                    <div className="relative mb-4 shrink-0">
+                       <Search className="w-4 h-4 absolute left-3 top-3 text-gray-400" />
+                       <input 
+                          type="text" 
+                          placeholder="Search library..." 
+                          value={exerciseSearchTerm}
+                          onChange={(e) => setExerciseSearchTerm(e.target.value)}
+                          className={tc("w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl pl-9 pr-4 py-2 text-sm text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500")}
+                       />
+                    </div>
+
+                    <div className="overflow-y-auto overscroll-contain flex-1 space-y-2 pb-4 custom-scrollbar pr-1">
+                       {[...EXERCISE_DB, ...customExerciseDB]
+                          .filter(ex => !currentDayPlan.find(p => p.id === ex.id))
+                          .filter(ex => ex.name.toLowerCase().includes(exerciseSearchTerm.toLowerCase()) || ex.target.toLowerCase().includes(exerciseSearchTerm.toLowerCase()))
+                          .map(ex => (
+                          <div key={ex.id} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+                              <div>
+                                  <p className="font-bold text-sm text-gray-900 dark:text-white">{ex.name}</p>
+                                  <p className="text-xs text-gray-500">{ex.target}</p>
+                              </div>
+                              <button onClick={() => {
+                                  setCurrentDayPlan(prev => [...prev, ex]);
+                                  setShowAddModal(false);
+                                  setExerciseSearchTerm('');
+                              }} className={tc("p-2 bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-lg hover:bg-emerald-200 dark:hover:bg-emerald-500/40")}>
+                                  <Plus className="w-4 h-4"/>
+                              </button>
+                          </div>
+                       ))}
+                       {[...EXERCISE_DB, ...customExerciseDB].filter(ex => !currentDayPlan.find(p => p.id === ex.id)).length === 0 && (
+                           <p className="text-center text-sm text-gray-500 mt-4">All exercises added!</p>
+                       )}
+                    </div>
+                 </>
+              ) : (
+                 <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+                    <div>
+                      <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Exercise Name</label>
+                      <input type="text" placeholder="e.g. Barbell Hip Thrust" value={newCustomEx.name} onChange={e => setNewCustomEx({...newCustomEx, name: e.target.value})} className={tc("w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-3 text-sm text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500")} />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Target Muscle(s)</label>
+                      <input type="text" placeholder="e.g. Glutes, Hamstrings" value={newCustomEx.target} onChange={e => setNewCustomEx({...newCustomEx, target: e.target.value})} className={tc("w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-3 text-sm text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500")} />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                       <div>
+                         <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Location</label>
+                         <select value={newCustomEx.category} onChange={e => setNewCustomEx({...newCustomEx, category: e.target.value})} className={tc("w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-3 text-sm text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500")}>
+                           <option value="Gym workout">Gym workout</option>
+                           <option value="Home workout">Home workout</option>
+                           <option value="Aerobics">Cardio</option>
+                           <option value="Yoga">Flexibility</option>
+                         </select>
+                       </div>
+                       <div>
+                         <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Type</label>
+                         <select value={newCustomEx.type} onChange={e => setNewCustomEx({...newCustomEx, type: e.target.value})} className={tc("w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-3 text-sm text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500")}>
+                           <option value="strength">Strength</option>
+                           <option value="cardio">Cardio</option>
+                         </select>
+                       </div>
+                    </div>
+                    <button onClick={handleCreateCustomExercise} disabled={!newCustomEx.name} className={tc(`w-full mt-4 font-bold py-4 rounded-xl shadow-lg transition-all ${newCustomEx.name ? 'bg-emerald-500 text-white shadow-emerald-500/20' : 'bg-gray-200 dark:bg-gray-800 text-gray-400 cursor-not-allowed'}`)}>
+                      Create & Add to Plan
+                    </button>
+                 </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Log Meal */}
+        {showLogMealModal && (
+          <div className="fixed inset-0 bg-black/60 z-[100] flex flex-col items-center justify-end md:justify-center">
+            <div className="bg-white dark:bg-gray-900 w-full max-w-md p-6 rounded-t-3xl md:rounded-3xl shadow-2xl max-h-[85vh] overflow-y-auto overscroll-contain">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center"><Edit2 className={tc("w-5 h-5 mr-2 text-emerald-500")}/> Log a Meal</h3>
+                <button onClick={() => setShowLogMealModal(false)}><XCircle className="w-6 h-6 text-gray-500 dark:text-gray-400"/></button>
+              </div>
+              <div className="grid grid-cols-2 gap-3 mb-3 relative">
+                <div className="col-span-2 relative">
+                   <input type="text" placeholder="Meal Name (Start typing...)" value={dietInput.name} onChange={handleDietInputChange} onFocus={() => dietInput.name.length > 1 && setShowFoodSuggestions(true)} onBlur={() => setTimeout(() => setShowFoodSuggestions(false), 200)} className={tc("w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-3 text-sm text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500")} />
+                   
+                   {/* Quick Add Suggestions */}
+                   {!dietInput.name && foodDB.length > 0 && (
+                     <div className="flex gap-2 overflow-x-auto pt-2 pb-1 custom-scrollbar">
+                       {foodDB.slice(0, 6).map((food, i) => (
+                         <button key={i} onClick={() => selectFoodSuggestion(food)} className={tc("shrink-0 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20 text-[10px] px-2.5 py-1.5 rounded-lg font-bold hover:bg-emerald-100 dark:hover:bg-emerald-500/20 transition-colors")}>
+                           + {food.name}
+                         </button>
+                       ))}
+                     </div>
+                   )}
+
+                   {showFoodSuggestions && (
+                     <div className="absolute top-full mt-1 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 max-h-40 overflow-y-auto">
+                       {foodDB.filter(f => f.name.toLowerCase().includes(dietInput.name.toLowerCase())).map((food, i) => (
+                         <div key={i} onClick={() => selectFoodSuggestion(food)} className="px-3 py-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer border-b border-gray-100 dark:border-gray-700 last:border-0 flex justify-between items-center text-sm">
+                           <span className="text-gray-900 dark:text-white">{food.name}</span>
+                           <span className={tc("text-xs text-emerald-500 font-bold")}>{food.cals} kcal</span>
+                         </div>
+                       ))}
+                     </div>
+                   )}
+                </div>
+                <input type="number" placeholder="Calories" value={dietInput.cals} onChange={e => setDietInput({...dietInput, cals: e.target.value})} className={tc("bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-3 text-sm text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500")} />
+                <input type="time" value={dietInput.time} onChange={e => setDietInput({...dietInput, time: e.target.value})} className={tc("bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-3 text-sm text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500")} />
+                <input type="number" placeholder="Protein (g)" value={dietInput.protein} onChange={e => setDietInput({...dietInput, protein: e.target.value})} className={tc("bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-3 text-sm text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500")} />
+                <input type="number" placeholder="Carbs (g)" value={dietInput.carbs} onChange={e => setDietInput({...dietInput, carbs: e.target.value})} className={tc("bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-3 text-sm text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500")} />
+                <input type="number" placeholder="Fats (g)" value={dietInput.fats} onChange={e => setDietInput({...dietInput, fats: e.target.value})} className={tc("col-span-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-3 text-sm text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500")} />
+              </div>
+              <div className="flex items-center mb-6 ml-1 mt-2">
+                 <input type="checkbox" id="saveDb" checked={saveToDB} onChange={(e) => setSaveToDB(e.target.checked)} className={tc("mr-2 accent-emerald-500 w-4 h-4 rounded")} />
+                 <label htmlFor="saveDb" className="text-sm text-gray-500 dark:text-gray-400">Save to Database for future</label>
+              </div>
+              <button onClick={handleLogMeal} className={tc("w-full bg-emerald-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-emerald-500/20")}>
+                Add to Daily Log
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Saved Diets */}
+        {showSavedDietsModal && (
+          <div className="fixed inset-0 bg-black/60 z-[100] flex flex-col items-center justify-end md:justify-center">
+            <div className="bg-white dark:bg-gray-900 w-full max-w-md p-6 rounded-t-3xl md:rounded-3xl max-h-[85vh] overflow-y-auto overscroll-contain shadow-2xl">
+               <div className="flex items-center justify-between mb-4">
+                 <div className="flex items-center">
+                   <Apple className={tc("w-6 h-6 text-emerald-500 mr-2")} />
+                   <h3 className="text-lg font-bold text-gray-900 dark:text-white">Saved Diets</h3>
+                 </div>
+                 <button onClick={() => setShowSavedDietsModal(false)}><XCircle className="w-6 h-6 text-gray-500 dark:text-gray-400"/></button>
+              </div>
+              
+              <div className="space-y-3">
+                {foodDB.map((food, i) => (
+                  <div key={i} className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl border border-gray-200 dark:border-gray-700 group transition-all relative overflow-hidden">
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <p className="font-bold text-sm text-gray-900 dark:text-white">{food.name}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">P:{food.protein}g | C:{food.carbs}g | F:{food.fats}g</p>
+                      </div>
+                      <span className={tc("text-emerald-600 dark:text-emerald-400 font-bold text-sm bg-emerald-100 dark:bg-emerald-500/10 px-2 py-0.5 rounded")}>{food.cals} kcal</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => prefillDietInput(food)} className="flex-1 bg-blue-100 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 text-xs font-bold py-2 rounded flex items-center justify-center hover:bg-blue-200 dark:hover:bg-blue-500/20 transition-colors">
+                        <Edit2 className="w-4 h-4 mr-1" /> Log
+                      </button>
+                      <a href={`https://www.youtube.com/results?search_query=${encodeURIComponent(food.name + ' recipe healthy')}`} target="_blank" rel="noreferrer" className="flex-1 bg-red-100 dark:bg-red-500/10 text-red-600 dark:text-red-400 text-xs font-bold py-2 rounded flex items-center justify-center hover:bg-red-200 dark:hover:bg-red-500/20 transition-colors">
+                        <Youtube className="w-4 h-4 mr-1" /> Recipe
+                      </a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Database Management */}
+        {showDBModal && (
+          <div className="fixed inset-0 bg-black/60 z-[100] flex flex-col items-center justify-end md:justify-center">
+            <div className="bg-white dark:bg-gray-900 w-full max-w-md p-6 rounded-t-3xl md:rounded-3xl max-h-[85vh] overflow-y-auto overscroll-contain shadow-2xl">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="font-bold text-lg text-gray-900 dark:text-white flex items-center"><Database className={tc("w-5 h-5 mr-2 text-emerald-500")}/> Food Database</h3>
+                <button onClick={() => setShowDBModal(false)}><XCircle className="w-6 h-6 text-gray-500 dark:text-gray-400"/></button>
+              </div>
+              <div className="space-y-2">
+                {foodDB.map((food, i) => (
+                  <div key={i} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+                    <div>
+                      <p className="font-bold text-sm text-gray-900 dark:text-white truncate max-w-[180px]">{food.name}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">P:{food.protein} C:{food.carbs} F:{food.fats}</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className={tc("text-emerald-500 font-bold text-xs")}>{food.cals} kcal</span>
+                      <button onClick={() => handleDeleteFromDB(food.id)} className="p-2 hover:bg-red-100 dark:hover:bg-red-500/10 rounded"><Trash2 className="w-4 h-4 text-red-500" /></button>
+                    </div>
+                  </div>
+                ))}
+                {foodDB.length === 0 && <p className="text-center text-sm text-gray-500 py-4">Database is empty.</p>}
+              </div>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  };
 
   // --- EARLY RETURNS ---
   if (!profile) return renderOnboarding();
@@ -1875,12 +2081,15 @@ export default function App() {
         )}
 
         {/* Main Content Area */}
-        <div className="flex-1 overflow-y-auto pt-16">
+        <div className="flex-1 overflow-y-auto pt-16 relative">
           {activeTab === 'home' && renderDashboard()}
           {activeTab === 'diet' && renderDiet()}
           {activeTab === 'analytics' && renderAnalytics()}
           {activeTab === 'profile' && renderProfile()}
         </div>
+        
+        {/* Render All Global Modals Above Main Content */}
+        {renderModals()}
 
         {/* Bottom Navigation */}
         <div className="absolute bottom-0 left-0 right-0 bg-white/95 dark:bg-gray-950/95 backdrop-blur-md border-t border-gray-200 dark:border-gray-800 px-6 py-4 flex justify-between items-center z-40">
@@ -1905,7 +2114,7 @@ export default function App() {
         <style dangerouslySetInnerHTML={{__html: `
           @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
           .animate-fade-in { animation: fade-in 0.4s ease-out forwards; }
-          .custom-scrollbar::-webkit-scrollbar { height: 6px; }
+          .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
           .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
           .custom-scrollbar::-webkit-scrollbar-thumb { background-color: rgba(156, 163, 175, 0.4); border-radius: 10px; }
           .dark .custom-scrollbar::-webkit-scrollbar-thumb { background-color: rgba(75, 85, 99, 0.6); }
